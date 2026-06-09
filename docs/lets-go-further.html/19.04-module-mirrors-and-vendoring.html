@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta http-equiv="x-ua-compatible" content="ie=edge">
+		<meta name="author" content="Alex Edwards">
+		<meta name="copyright" content="Copyright Alex Edwards 2026">
+		<title>Module mirrors and vendoring &mdash; Let's Go Further</title>
+		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+		<link rel="stylesheet" type="text/css" href="assets/css/main.css">
+		<link rel="icon" type="image/x-icon" href="assets/img/favicon.ico">
+	</head>
+	<body>
+		<header>
+			<div class="wrapper">
+				<div>
+					
+						
+						<a href="00.00-front-matter.html">Let's Go Further</a> <span class="crumbs">&rsaquo; <a href="19.00-building-versioning-and-quality-control.html">Building, versioning and quality control</a> &rsaquo; Module mirrors and vendoring</span>
+						
+					
+				</div>
+				<div>
+					&lsaquo; <a href="19.03-quality-controlling-code.html">Previous</a>
+					&middot; <a href="00.01-contents.html">Contents</a> &middot;
+					<a href="19.05-building-binaries.html">Next</a> &rsaquo;
+				</div>
+			</div>
+		</header>
+		<main class="wrapper text">
+			<div class="chapter">Chapter 19.4.</div>
+			<h2 id="module-mirrors-and-vendoring">Module mirrors and vendoring</h2>
+
+<p>One of the risks of using third-party packages in your Go code is that the version control repository where it is hosted (e.g GitHub, GitLab or BitBucket) will be temporarily unavailable when you need to fetch a copy of the code. Or worse, the owner might delete the repository altogether without adequate warning. For example, the <code>httprouter</code> package plays a central part in our application, and if the author ever decided to delete it from GitHub it would cause us quite a headache to scramble and replace it with an alternative.</p>
+
+<p>(I&rsquo;m not suggesting this is likely to happen with <code>httprouter</code> &mdash; just using it as an example!)</p>
+
+<p>Fortunately, Go provides two ways in which we can mitigate this risk: <em>module mirrors</em> and <em>vendoring</em>.</p>
+
+<h3 id="module-mirrors">Module mirrors</h3>
+
+<p>Go supports using <em>module mirrors</em> (sometimes also known as <em>module proxies</em>), which are services that mirror source code from the original, authoritative, repositories.</p>
+
+<p>The most well-known (and well-used) module mirror is <a href="https://proxy.golang.org/"><code>proxy.golang.org</code></a>, which is maintained by the Go team at Google and contains copies of the source code from tens of thousands of open-source Go repositories.</p>
+
+<p>By default, whenever you fetch a module using <code>go get</code> or one of the <code>go mod *</code> commands, the <code>go</code> tool will first attempt to retrieve the appropriate version of the source code from the <code>proxy.golang.org</code> mirror. If it can&rsquo;t be found in the mirror, then it will fall back to fetching the code from the authoritative repository.</p>
+
+<p>If you run the <code>go env</code> command on your machine, you should see that there is a <code>GOPROXY</code> environment variable setting similar to this:</p>
+
+<figure class="code bash">
+<pre>$ go env
+<samp>...
+GOPRIVATE=&#39;&#39;
+GOPROXY=&#39;https://proxy.golang.org,direct&#39;
+GOROOT=&#39;/usr/local/go&#39;
+...</samp></pre>
+</figure>
+
+<p>This setting contains the list of sources that the <code>go</code> tool will fetch source code from, separated by commas (<code>,</code>) or pipes (<code>|</code>).</p>
+
+<p>Unless you&rsquo;ve already changed it from the default value, you should see that the <code>GOPROXY</code> setting equals <code>'https://proxy.golang.org,direct'</code>. This means that the <code>go</code> tool will try to fetch source code from <code>https://proxy.golang.org</code> first, then fall back to fetching a copy directly from the authoritative host (thanks to the <code>direct</code> directive).</p>
+
+<p>You can change this to use alternative module mirrors &mdash; such as <a href="https://goproxy.io/">goproxy.io</a> &mdash; if you prefer. For example, if you want use <code>https://goproxy.io</code> as your primary source,
+then use <code>https://proxy.golang.org</code> as a secondary source, then fall back to a direct
+fetch, you would update your <code>GOPROXY</code> setting like so:</p>
+
+<figure class="code bash">
+<pre>$ export GOPROXY=https://goproxy.io,https://proxy.golang.org,direct</pre>
+</figure>
+
+<p>Or if you want to disable module mirrors altogether, you can simply set the value to <code>direct</code>
+like so:</p>
+
+<figure class="code bash">
+<pre>$ export GOPROXY=direct</pre>
+</figure>
+
+<p>It&rsquo;s important to explain that if you use the pipe character <code>|</code> as a separator, rather than a comma, it subtly changes the behavior.</p>
+
+<p>When a comma is used as the separator, the <code>go</code> tool will fall back to fetching from the next source only after receiving a <code>404</code> (not found) or <code>410</code> (gone) HTTP response from the mirror. If there is any other error, including a network timeout, the error is considered terminal and the fetch will fail.</p>
+
+<p>Whereas if you use <code>|</code> as the separator, it will fall back to trying the next source after <em>any</em> error, which is useful if the mirror is temporarily unavailable or experiencing problems.</p>
+
+<figure class="code bash">
+<pre>$ export GOPROXY=https://proxy.golang.org|direct</pre>
+</figure>
+
+<p>But in general, I recommend leaving <code>GOPROXY</code> with its default setting unless you have a good reason to change it &mdash; like you want to use an alternative mirror, or <code>proxy.golang.org</code> is unavailable for a long period of time.</p>
+
+<h3 id="vendoring">Vendoring</h3>
+
+<p>Go&rsquo;s module mirror functionality is great, but it isn&rsquo;t a silver bullet for all developers and all projects.</p>
+
+<p>For example, perhaps you don&rsquo;t trust or wish to rely on module mirrors provided by Google or other third-parties. Or maybe you need to routinely work in an environment without network access. In those scenarios you probably still want to mitigate the risk of a disappearing dependency, but using a module mirror isn&rsquo;t possible or appealing.</p>
+
+<p>You should also be aware that the default <code>proxy.golang.org</code> module mirror doesn&rsquo;t absolutely guarantee that it will store source code forever. From <a href="https://proxy.golang.org/">the FAQs</a>:</p>
+
+<blockquote>
+<p>proxy.golang.org does not save all modules forever. There are a number of reasons for this, but one reason is if proxy.golang.org is not able to detect a suitable license. In this case, only a temporarily cached copy of the module will be made available, and may become unavailable if it is removed from the original source and becomes outdated.</p>
+</blockquote>
+
+<p>Additionally, if you need to come back to a &lsquo;cold&rsquo; codebase in 5 or 10 years&rsquo; time, will the <code>proxy.golang.org</code> module mirror still be available? Hopefully it will &mdash; but it&rsquo;s hard to say for sure.</p>
+
+<p>So, for these reasons, it can still be sensible to <em>vendor</em> your project dependencies using the <code>go mod vendor</code> command. Vendoring dependencies in this way basically stores a complete copy of the source code for third-party packages in a <code>vendor</code> folder in your project.</p>
+
+<p>Let&rsquo;s demonstrate how to do this. We&rsquo;ll start by adapting our <code>make tidy</code> rule to also call the <code>go mod verify</code> and <code>go mod vendor</code> commands, like so:</p>
+
+<figure class="code shell">
+<figcaption>File: Makefile</figcaption>
+<pre>...
+
+<span class="c1"># ==================================================================================== #</span>
+<span class="c1"># QUALITY CONTROL</span>
+<span class="c1"># ==================================================================================== #</span>
+
+<span class="c1">## tidy: tidy and vendor module dependencies, and format and modernize all .go files</span>
+.PHONY: tidy
+tidy:
+	go mod tidy
+	go mod verify
+	go mod vendor
+    go fix ./...
+	go fmt ./...
+
+...</pre>
+</figure>
+
+<p>Just to be clear about what&rsquo;s going on behind-the-scenes here, let&rsquo;s quickly step through what will happen when we run <code>make tidy</code>:</p>
+
+<ul>
+<li>The <code>go mod tidy</code> command will make sure the <code>go.mod</code> and <code>go.sum</code> files list all the necessary dependencies for our project (and no unnecessary ones).</li>
+<li>The <code>go mod verify</code> command will verify that the dependencies stored in your module cache (located on your machine at <code>$GOPATH/pkg/mod</code>)  match the checksums in the <code>go.sum</code> file.</li>
+<li>The <code>go mod vendor</code> command will then copy the necessary source code from your module cache into a new <code>vendor</code> directory in your project root.</li>
+</ul>
+
+<p>Let&rsquo;s try this out and run the new <code>tidy</code> rule like so:</p>
+
+<figure class="code bash">
+<pre>$ make tidy
+<samp>go mod tidy
+go mod verify
+all modules verified
+go mod vendor
+go fix ./...
+go fmt ./...</samp></pre>
+</figure>
+
+<p>Once that&rsquo;s completed, you should see that a new <code>vendor</code> directory has been created containing copies of all the source code along with a <code>modules.txt</code> file. The directory structure in your <code>vendor</code> folder should look similar to this:</p>
+
+<figure class="code bash">
+<pre>$ tree -L 3 ./vendor/
+<samp>./vendor/
+├── github.com
+│   ├── BurntSushi
+│   │   └── toml
+│   ├── julienschmidt
+│   │   └── httprouter
+│   ├── lib
+│   │   └── pq
+│   ├── tomasen
+│   │   └── realip
+│   └── wneessen
+│       └── go-mail
+├── golang.org
+│   └── x
+│       ├── crypto
+│       ├── exp
+│       ├── mod
+│       ├── sync
+│       ├── text
+│       ├── time
+│       └── tools
+├── honnef.co
+│   └── go
+│       └── tools
+└── modules.txt</samp></pre>
+</figure>
+
+<p>Now, when you run a command such as <code>go run</code>, <code>go test</code> or <code>go build</code>, the <code>go</code> tool will recognize the presence of a <code>vendor</code> folder and  <em>the dependency code in the vendor folder</em> will be used &mdash; rather than the code in the module cache on your local machine.</p>
+
+<p>If you like, go ahead and try running the API application. You should find that everything compiles and continues to work just like before.</p>
+
+<figure class="code bash">
+<pre>$ make run/api 
+<samp>go run ./cmd/api -db-dsn=postgres://greenlight:pa55word@localhost/greenlight
+time=2023-09-10T10:59:13.722+02:00 level=INFO msg=&#34;database connection pool established&#34;
+time=2023-09-10T10:59:13.722+02:00 level=INFO msg=&#34;starting server&#34; addr=:4000 env=development</samp></pre>
+</figure>
+
+<aside class="hint"><p>
+<strong>Note:</strong> If you want to confirm that it&rsquo;s really the vendored dependencies being used, you can run <code>go clean -modcache</code> to remove <em>everything</em> from your local module cache. When you run the API again, you should find that it still starts up correctly <em>without</em> needing to refetch the dependencies from the Go module mirror.
+</p></aside>
+
+<p>Because all the dependency source code is now stored in your project repository itself, it&rsquo;s easy to check it into Git (or an alternative version control system) alongside the rest of your code. This is reassuring because it gives you ownership of all the code used to build and run your applications, kept under version control.</p>
+
+<p>The downside of this, of course, is that it adds size and bloat to your project repository. This is of particular concern in projects that have a lot of dependencies and the repository will be cloned <em>a lot</em>, such as projects where a CI/CD system clones the repository with each new commit.</p>
+
+<p>Let&rsquo;s also take a quick look in the <code>vendor/modules.txt</code> file that was created. If you&rsquo;ve been following along it should look similar to this:</p>
+
+<figure class="code plain">
+<figcaption>File: vendor/modules.txt</figcaption>
+<pre># github.com/BurntSushi/toml v1.4.1-0.20240526193622-a339e1f7089c
+## explicit; go 1.18
+github.com/BurntSushi/toml
+github.com/BurntSushi/toml/internal
+# github.com/julienschmidt/httprouter v1.3.0
+## explicit; go 1.7
+github.com/julienschmidt/httprouter
+# github.com/lib/pq v1.11.2
+## explicit; go 1.21
+github.com/lib/pq
+github.com/lib/pq/internal/pgpass
+github.com/lib/pq/internal/pqsql
+github.com/lib/pq/internal/pqutil
+github.com/lib/pq/internal/proto
+github.com/lib/pq/oid
+github.com/lib/pq/scram
+# github.com/tomasen/realip v0.0.0-20180522021738-f0c99a92ddce
+## explicit
+github.com/tomasen/realip
+# github.com/wneessen/go-mail v0.7.2
+## explicit; go 1.24.0
+github.com/wneessen/go-mail
+github.com/wneessen/go-mail/internal/pkcs7
+github.com/wneessen/go-mail/log
+github.com/wneessen/go-mail/smtp
+... etc.</pre>
+</figure>
+
+<p>This <code>vendor/modules.txt</code> file is essentially a <em>manifest</em> of the vendored packages and their version numbers. When vendoring is being used, the <code>go</code> tool will check that the module version numbers in <code>modules.txt</code> are consistent with the version numbers in the <code>go.mod</code> file. If there&rsquo;s any inconsistency, then the <code>go</code> tool will report an error.</p>
+
+<aside class="hint"><p>
+<strong>Note:</strong> It&rsquo;s important to point out that there&rsquo;s no easy way to verify that the <em>checksums of the vendored dependencies</em> match the checksums in the <code>go.sum</code> file. Or, in other words, there&rsquo;s no equivalent to <code>go mod verify</code> which works <em>directly</em> on the contents of the <code>vendor</code> folder.</p>
+
+<p>To mitigate that, it&rsquo;s a good idea to run <em>both</em> <code>go mod verify</code> and <code>go mod vendor</code> regularly &mdash; which is one of the reasons for including them both as part of the <code>make tidy</code> rule. Using <code>go mod verify</code> will verify that the dependencies in your module cache match the <code>go.sum</code> file, and <code>go mod vendor</code> will copy those same dependencies from the module cache into your <code>vendor</code> folder.
+</p></aside>
+
+<p>Lastly, you should avoid making any changes to the code in the <code>vendor</code> directory. Doing so can potentially cause confusion (because the code would no longer be consistent with the original version of the source code) and &mdash; besides &mdash; running <code>go mod vendor</code> will overwrite any changes you make each time you run it. If you need to change the code for a dependency, it&rsquo;s much better to fork it and import the forked version instead.</p>
+
+<hr />
+
+<h3 id="additional-information">Additional information</h3>
+
+<h4 id="inconsistent-vendoring-error">Inconsistent vendoring error</h4>
+
+<p>Every time you add, remove or upgrade a dependency, make sure to run <code>go mod vendor</code> or the <code>make tidy</code> command immediately afterwards to synchronize the contents of the <code>vendor</code> folder with your <code>go.mod</code> file. If you don&rsquo;t, you&rsquo;ll run into an &ldquo;inconsistent vendoring&rdquo; error similar to this:</p>
+
+<figure class="code bash">
+<pre>$ make run/api 
+<samp>go: inconsistent vendoring in /home/alex/Projects/greenlight:
+        github.com/foo/bar@v0.1.0: is explicitly 
+            required in go.mod, but not marked as explicit in vendor/modules.txt
+
+        To ignore the vendor directory, use -mod=readonly or -mod=mod.
+        To sync the vendor directory, run:
+                go mod vendor</samp></pre>
+</figure>
+
+<h4 id="the-pattern">The ./&hellip; pattern</h4>
+
+<p>Most of the <code>go</code> tools support the <code>./...</code> wildcard pattern, like <code>go fmt ./...</code>, <code>go vet ./...</code> and <code>go test ./...</code>. This pattern matches the current directory and all sub-directories, <em>excluding the <code>vendor</code> directory</em>.</p>
+
+<p>Generally speaking, this is useful because it means that we&rsquo;re not formatting, vetting or testing the code in our <code>vendor</code> directory unnecessarily &mdash; and our <code>make audit</code> rule won&rsquo;t fail due to any problems that might exist <em>within</em> those vendored packages.</p>
+
+		</main>
+		<footer>
+			<div class="wrapper">
+				<div>
+					&lsaquo; <a href="19.03-quality-controlling-code.html">Previous</a>
+				</div>
+				<div>
+					<a href="00.01-contents.html">Contents</a>
+				</div>
+				<div>
+					<a href="19.05-building-binaries.html">Next</a> &rsaquo;
+				</div>
+			</div>
+		</footer>
+		<script>
+			document.onkeydown = function(evt) {
+				evt = evt || window.event;
+				switch (evt.keyCode) {
+					
+					case 37:
+						window.location.href = "19.03-quality-controlling-code.html";
+						break;
+						
+					
+					case 39:
+						window.location.href = "19.05-building-binaries.html";
+						break;
+						
+				}
+			};
+		</script>
+	</body>
+</html>
