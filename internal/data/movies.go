@@ -2,6 +2,7 @@ package data
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/lealencar/greenlight/internal/validator"
@@ -69,9 +70,52 @@ func (m MovieModel) Insert(movie Movie) (Movie, error) {
 }
 
 // Add a placeholder method for fetching a specific record from the movies table.
-//func (m MovieModel) Get(id int) (Movie, error) {
-//	return nil, nil
-//}
+func (m MovieModel) Get(id int) (Movie, error) {
+	// The PostgreSQL id value that we're using for the movie ID starts
+	// auto-incrementing at 1 by default, so we know that no movies will have ID values
+	// less than that. To avoid making an unnecessary database call, we take a shortcut
+	// and return an ErrRecordNotFound error straight away.
+	if id < 1 {
+		return Movie{}, ErrRecordNotFound
+	}
+
+	// Define the SQL query for retrieving the movie data.
+	query := `
+        SELECT id, created_at, title, year, runtime, genres, version
+        FROM movies
+        WHERE id = $1`
+
+	// Declare a Movie struct to hold the data returned by the query.
+	var movie Movie
+
+	// Execute the query using the QueryRow() method, passing in the provided id value
+	// as a placeholder parameter, and scan the response data into the fields of the
+	// Movie struct. Importantly, note that we need to convert the scan target for the
+	// genres column using the pq.Array() adapter function again.
+	err := m.DB.QueryRow(query, id).Scan(
+		&movie.ID,
+		&movie.CreatedAt,
+		&movie.Title,
+		&movie.Year,
+		&movie.Runtime,
+		pq.Array(&movie.Genres),
+		&movie.Version,
+	)
+	// Handle any errors. If there was no matching movie found, Scan() will return
+	// a sql.ErrNoRows error. We check for this and return our custom ErrRecordNotFound
+	// error instead.
+	if err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return Movie{}, ErrRecordNotFound
+		default:
+			return Movie{}, err
+		}
+	}
+
+	// Otherwise, return the Movie struct.
+	return movie, nil
+}
 
 // Add a placeholder method for updating a specific record in the movies table.
 //func (m MovieModel) Update(movie Movie) (Movie, error) {
