@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/lealencar/greenlight/internal/data"
+	"github.com/lealencar/greenlight/internal/validator"
 )
 
 func (app *application) createMovieHandler(w http.ResponseWriter, r *http.Request) {
@@ -14,10 +15,10 @@ func (app *application) createMovieHandler(w http.ResponseWriter, r *http.Reques
 	// of the Movie struct that we created earlier). This struct will be our *target
 	// decode destination*.
 	var input struct {
-		Title   string   `json:"title"`
-		Year    int      `json:"year"`
-		Runtime int      `json:"runtime"`
-		Genres  []string `json:"genres"`
+		Title   string       `json:"title"`
+		Year    int          `json:"year"`
+		Runtime data.Runtime `json:"runtime"` // Make this field a data.Runtime type.
+		Genres  []string     `json:"genres"`
 	}
 
 	// Use the new readJSON() helper to decode the request body into the input struct.
@@ -28,7 +29,24 @@ func (app *application) createMovieHandler(w http.ResponseWriter, r *http.Reques
 		app.badRequestResponse(w, r, err)
 		return
 	}
-	// Dump the contents of the input struct in an HTTP response.
+	// Copy the values from the input struct to a new Movie struct.
+	movie := data.Movie{
+		Title:   input.Title,
+		Year:    input.Year,
+		Runtime: input.Runtime,
+		Genres:  input.Genres,
+	}
+
+	// Initialize a new Validator.
+	v := validator.New()
+
+	// Call the ValidateMovie() function, and if any checks fail, return a response
+	// containing the errors.
+	if data.ValidateMovie(v, movie); !v.Valid() {
+		app.failedValidationResponse(w, r, v.Errors)
+		return
+	}
+
 	fmt.Fprintf(w, "%+v\n", input)
 }
 
