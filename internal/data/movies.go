@@ -1,9 +1,11 @@
 package data
 
 import (
+	"database/sql"
 	"time"
 
 	"github.com/lealencar/greenlight/internal/validator"
+	"github.com/lib/pq"
 )
 
 type Movie struct {
@@ -36,3 +38,47 @@ func ValidateMovie(v *validator.Validator, movie Movie) {
 	v.Check(len(movie.Genres) <= 5, "genres", "must not contain more than 5 genres")
 	v.Check(validator.Unique(movie.Genres), "genres", "must not contain duplicate values")
 }
+
+// Define a MovieModel struct type which wraps a sql.DB connection pool.
+type MovieModel struct {
+	DB *sql.DB
+}
+
+// The Insert() method accepts a movie struct which should contain the data for the
+// new record.
+func (m MovieModel) Insert(movie Movie) (Movie, error) {
+	// Define a SQL query which inserts a new record in the movies table, and returns
+	// the system-generated data.
+	query := `
+        INSERT INTO movies (title, year, runtime, genres) 
+        VALUES ($1, $2, $3, $4)
+        RETURNING id, created_at, version`
+
+	// Create an args slice containing the values for the placeholder parameters.
+	// Declaring this slice immediately next to our SQL query helps to make it nice
+	// and clear *what values are being used where* in the query.
+	args := []any{movie.Title, movie.Year, movie.Runtime, pq.Array(movie.Genres)}
+
+	// Use the QueryRow() method to execute the SQL query on our connection pool,
+	// passing in the elements of the args slice as variadic arguments and scanning
+	// the system-generated id, created_at and version values into the movie struct.
+	err := m.DB.QueryRow(query, args...).Scan(&movie.ID, &movie.CreatedAt, &movie.Version)
+
+	// Return the updated movie struct containing the system-generated data.
+	return movie, err
+}
+
+// Add a placeholder method for fetching a specific record from the movies table.
+//func (m MovieModel) Get(id int) (Movie, error) {
+//	return nil, nil
+//}
+
+// Add a placeholder method for updating a specific record in the movies table.
+//func (m MovieModel) Update(movie Movie) (Movie, error) {
+//	return nil
+//}
+
+// Add a placeholder method for deleting a specific record from the movies table.
+//func (m MovieModel) Delete(id int) error {
+//	return nil
+//}
