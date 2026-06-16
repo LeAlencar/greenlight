@@ -9,6 +9,7 @@ import (
 // looking up a movie that doesn't exist in our database.
 var (
 	ErrRecordNotFound = errors.New("record not found")
+	ErrEditConflict   = errors.New("edit conficlit")
 )
 
 // Create a Models struct which wraps the MovieModel. We'll add other models to this,
